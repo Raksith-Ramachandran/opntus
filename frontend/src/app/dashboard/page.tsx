@@ -1,12 +1,16 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Dashboard() {
+  const router = useRouter();
   const [status, setStatus] = useState("Connecting...");
   const [logs, setLogs] = useState<string[]>([]);
   const [online, setOnline] = useState(false);
   const [waiting, setWaiting] = useState<any[]>([]);
+  const [authed, setAuthed] = useState(false);
   const socketRef = useRef<any>(null);
+  const onlineRef = useRef(false);
 
   const addLog = (msg: string) => {
     console.log(msg);
@@ -15,17 +19,19 @@ export default function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem("opntus_token");
-    if (!token) { window.location.href = "/listener/login"; return; }
+    if (!token) { router.replace("/listener/login"); return; }
+    setAuthed(true);
 
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "https://opntus-backend.onrender.com";
     addLog(`Connecting to ${WS_URL}`);
 
-    // Dynamic import to avoid SSR issues
     import("socket.io-client").then(({ io }) => {
       const socket = io(WS_URL, {
         auth: { token },
         transports: ["websocket", "polling"],
         reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 2000,
       });
 
       socketRef.current = socket;
@@ -33,6 +39,15 @@ export default function Dashboard() {
       socket.on("connect", () => {
         setStatus("✅ Connected: " + socket.id);
         addLog("Connected! ID: " + socket.id);
+        // Re-sync online status on reconnect
+        if (onlineRef.current) {
+          const API = process.env.NEXT_PUBLIC_API_URL || "https://opntus-backend.onrender.com/api";
+          fetch(`${API}/listeners/me/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ status: "online" }),
+          }).catch(() => {});
+        }
       });
 
       socket.on("connect_error", (err: any) => {
@@ -40,10 +55,11 @@ export default function Dashboard() {
         addLog("Error: " + err.message);
       });
 
+      // Only update UI on disconnect — do NOT set offline here
+      // Backend handles offline on permanent disconnect via socket middleware
       socket.on("disconnect", (reason: string) => {
-        setStatus("❌ Disconnected: " + reason);
+        setStatus("⚠️ Disconnected: " + reason + " (reconnecting...)");
         addLog("Disconnected: " + reason);
-        setOnline(false);
       });
 
       socket.on("queue:new_user", (data: any) => {
@@ -55,7 +71,8 @@ export default function Dashboard() {
         addLog("🎉 Session started: " + data.roomId);
         localStorage.setItem("opntus_room", String(data.roomId));
         localStorage.setItem("opntus_session_id", String(data.sessionId));
-        setTimeout(() => { window.location.href = "/chat?role=listener"; }, 100);
+        socket.disconnect();
+        setTimeout(() => { window.location.href = "/chat?role=listener"; }, 150);
       });
     });
 
@@ -68,6 +85,7 @@ export default function Dashboard() {
     const token = localStorage.getItem("opntus_token");
     const newStatus = !online;
     setOnline(newStatus);
+    onlineRef.current = newStatus;
     addLog(newStatus ? "🟢 Going online" : "🔴 Going offline");
 
     try {
@@ -78,7 +96,7 @@ export default function Dashboard() {
         body: JSON.stringify({ status: newStatus ? "online" : "offline" }),
       });
       addLog("Status updated on server");
-    } catch (err) {
+    } catch {
       addLog("Failed to update status");
     }
   }
@@ -90,11 +108,13 @@ export default function Dashboard() {
     addLog("Accepted user: " + mood);
   }
 
+  // Prevent flash of dashboard before auth check
+  if (!authed) return null;
+
   return (
     <div className="min-h-screen bg-[#F8F7FF] dark:bg-[#12111A] p-6">
       <div className="max-w-4xl mx-auto space-y-6">
 
-        {/* Header */}
         <div className="bg-white dark:bg-[#1A1928] rounded-2xl p-6 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-serif font-bold text-slate-800 dark:text-slate-100">OPNTUS Listener Dashboard</h1>
@@ -109,7 +129,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Go online banner */}
         {!online && (
           <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-2xl p-5 text-center">
             <p className="text-blue-700 dark:text-blue-300 font-medium mb-3">Toggle Online to receive users</p>
@@ -120,7 +139,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Waiting Users */}
         <div className="bg-white dark:bg-[#1A1928] rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
             <h2 className="font-semibold text-slate-800 dark:text-slate-100">Waiting Users</h2>
@@ -152,7 +170,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Debug Logs */}
         <div className="bg-[#0d1117] rounded-2xl p-6">
           <p className="text-green-400 font-mono text-xs font-bold mb-3">Connection Logs:</p>
           {logs.length === 0

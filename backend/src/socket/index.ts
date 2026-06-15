@@ -45,6 +45,13 @@ export function initSocket(io: SocketServer) {
     if (data.userType === "listener" && data.listenerId) listenerSockets.set(data.listenerId, socket.id);
     else if (data.userId) userSockets.set(data.userId, socket.id);
 
+    // Listener rejoining a room after page navigation
+    socket.on("join:room", ({ roomId }: { roomId: string }) => {
+      if (data.userType !== "listener") return;
+      socket.join(roomId);
+      logger.info(`Listener rejoined room: ${roomId}`);
+    });
+
     socket.on("join:queue", async ({ mood }: { mood: string }) => {
       if (data.userType !== "user" || !data.userId) return;
       if (!queue.find(q => q.userId === data.userId))
@@ -116,8 +123,21 @@ export function initSocket(io: SocketServer) {
     });
 
     socket.on("disconnect", async () => {
-      if (data.userId) { const idx = queue.findIndex(q => q.userId === data.userId); if (idx !== -1) queue.splice(idx, 1); userSockets.delete(data.userId); }
-      if (data.listenerId) { listenerSockets.delete(data.listenerId); await Listener.findByIdAndUpdate(data.listenerId, { status: "offline" }); }
+      if (data.userId) {
+        const idx = queue.findIndex(q => q.userId === data.userId);
+        if (idx !== -1) queue.splice(idx, 1);
+        userSockets.delete(data.userId);
+      }
+      if (data.listenerId) {
+        listenerSockets.delete(data.listenerId);
+        // Delay offline status update to allow reconnects (tab switches, brief network drops)
+        setTimeout(async () => {
+          const currentSocketId = listenerSockets.get(data.listenerId!);
+          if (!currentSocketId) {
+            await Listener.findByIdAndUpdate(data.listenerId, { status: "offline" });
+          }
+        }, 8000);
+      }
     });
   });
 
