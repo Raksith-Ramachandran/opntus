@@ -17,7 +17,7 @@ export default function ListenerLogin() {
         body: JSON.stringify({email,password:pass})
       });
       const data = await res.json();
-      if(!res.ok){ setErr(data.error||"Login failed"); return; }
+      if(!res.ok){ setErr(data.error||"Login failed"); setLoad(false); return; }
       localStorage.setItem("opntus_token", data.token);
       window.location.href="/dashboard";
     } catch { setErr("Network error. Please try again."); }

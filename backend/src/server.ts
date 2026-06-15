@@ -14,6 +14,7 @@ import adminRoutes   from "./routes/admin";
 import userRoutes    from "./routes/users";
 import { initSocket } from "./socket";
 import { errorHandler } from "./middleware/errorHandler";
+import { csrfProtection } from "./middleware/csrf";
 import { logger } from "./utils/logger";
 
 dotenv.config();
@@ -40,6 +41,7 @@ app.use("/api/auth/", strictLimiter);
 app.use(express.json({ limit:"10kb" }));
 app.use(express.urlencoded({ extended:true, limit:"10kb" }));
 app.use(mongoSanitize());
+app.use(csrfProtection);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.get("/api/health", (_req,res) => res.json({ status:"ok", ts:new Date().toISOString() }));
@@ -55,7 +57,7 @@ app.use(errorHandler);
 const PORT = process.env.PORT||5000;
 mongoose.connect(process.env.MONGODB_URI!)
   .then(()=>{ logger.info("MongoDB connected"); server.listen(PORT,()=>logger.info(`Server on :${PORT}`)); })
-  .catch(err=>{ logger.error("MongoDB error:",err); process.exit(1); });
+  .catch(err => { logger.error("MongoDB error:", err instanceof Error ? err.message.replace(/[\r\n]/g, " ") : err); process.exit(1); });
 
 process.on("SIGTERM",()=>{ logger.info("Shutting down..."); server.close(()=>{ mongoose.connection.close(); process.exit(0); }); });
 export { io };
