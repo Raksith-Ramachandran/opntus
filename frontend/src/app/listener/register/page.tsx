@@ -16,7 +16,7 @@ export default function ListenerRegister() {
         method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(form)
       });
       const data = await res.json();
-      if(!res.ok){ setErr(data.error||"Registration failed"); setLoad(false); return; }
+      if(!res.ok){ setErr(data.error||"Registration failed"); return; }
       setDone(true);
     } catch { setErr("Network error. Please try again."); }
     finally { setLoad(false); }

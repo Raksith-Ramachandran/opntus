@@ -53,8 +53,6 @@ export default function ChatPage() {
 
   const onKey=(e:React.KeyboardEvent<HTMLTextAreaElement>)=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} };
 
-  useEffect(()=>{ return ()=>{ if(typTimer.current) clearTimeout(typTimer.current); }; },[]);
-
   return (
     <div className="flex flex-col h-screen bg-[#F8F7FF] dark:bg-[#12111A]">
       {/* Header */}
