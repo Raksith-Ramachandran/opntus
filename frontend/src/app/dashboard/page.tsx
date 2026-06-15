@@ -53,9 +53,9 @@ export default function Dashboard() {
 
       socket.on("session:started", (data: any) => {
         addLog("🎉 Session started: " + data.roomId);
-        localStorage.setItem("opntus_room", data.roomId);
-        localStorage.setItem("opntus_session_id", data.sessionId);
-        window.location.href = "/chat?role=listener";
+        localStorage.setItem("opntus_room", String(data.roomId));
+        localStorage.setItem("opntus_session_id", String(data.sessionId));
+        setTimeout(() => { window.location.href = "/chat?role=listener"; }, 100);
       });
     });
 
