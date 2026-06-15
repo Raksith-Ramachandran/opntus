@@ -47,7 +47,14 @@ export default function Dashboard() {
     const t = localStorage.getItem("opntus_token");
     if (!t) { window.location.href = "/listener/login"; return; }
     setToken(t);
+    console.log("🔌 Connecting to:", WS_URL);
+console.log("🔑 Token exists:", !!t);
 
+const socket = io(WS_URL, {
+  auth: { token: t },
+  transports: ["websocket", "polling"],
+  reconnection: true,
+});
     const socket = io(WS_URL, {
       auth: { token: t },
       transports: ["websocket", "polling"],
@@ -63,6 +70,20 @@ export default function Dashboard() {
       setConnected(false);
       setOnline(false);
     });
+    socket.on("connect", () => {
+  setConnected(true);
+  console.log("✅ Dashboard connected:", socket.id);
+});
+
+socket.on("disconnect", (reason) => {
+  setConnected(false);
+  setOnline(false);
+  console.log("❌ Disconnected:", reason);
+});
+
+socket.on("connect_error", (err) => {
+  console.log("❌ Connection error:", err.message);
+});
 
     // New user joined queue
     socket.on("queue:new_user", ({ userId, mood }) => {
