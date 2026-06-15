@@ -30,7 +30,16 @@ initSocket(io);
 
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy:false, crossOriginEmbedderPolicy:false }));
-app.use(cors({ origin:process.env.FRONTEND_URL||"http://localhost:3000", credentials:true, methods:["GET","POST","PUT","DELETE","PATCH"], allowedHeaders:["Content-Type","Authorization"] }));
+app.use(cors({
+  origin: [
+    process.env.FRONTEND_URL || "http://localhost:3000",
+    "http://localhost:3000",
+    /\.vercel\.app$/,
+  ],
+  credentials: true,
+  methods: ["GET","POST","PUT","DELETE","PATCH"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));
 
 const globalLimiter = rateLimit({ windowMs:15*60*1000, max:100, standardHeaders:true, legacyHeaders:false, message:{error:"Too many requests."} });
 const strictLimiter = rateLimit({ windowMs:60*60*1000, max:10,  standardHeaders:true, legacyHeaders:false, message:{error:"Too many auth requests."} });
