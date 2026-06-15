@@ -88,6 +88,19 @@ export function initSocket(io: SocketServer) {
       socket.to(roomId).emit("chat:typing", { senderType: data.userType, isTyping });
     });
 
+    // Voice chat signaling
+    socket.on("voice:offer", ({ roomId, offer }) => {
+      socket.to(roomId).emit("voice:offer", { offer });
+    });
+
+    socket.on("voice:answer", ({ roomId, answer }) => {
+      socket.to(roomId).emit("voice:answer", { answer });
+    });
+
+    socket.on("voice:ice-candidate", ({ roomId, candidate }) => {
+      socket.to(roomId).emit("voice:ice-candidate", { candidate });
+    });
+
     socket.on("session:end", async ({ roomId, sessionId }) => {
       const room = activeRooms.get(roomId);
       if (!room) return;

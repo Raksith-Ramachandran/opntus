@@ -199,6 +199,7 @@ function TalkNow() {
   const [step, setStep] = useState<"mood"|"type"|"queue">("mood");
   const [mood, setMood] = useState<string|null>(null);
   const [pos, setPos] = useState(0);
+  const selectedMood = mood;
   const [anonName] = useState(() => {
     const adjs = ["Calm","Silent","Blue","Gentle","Soft","Still","Clear","Warm"];
     const nouns = ["River","Sky","Leaf","Wave","Stone","Star","Cloud","Rain"];
@@ -207,7 +208,27 @@ function TalkNow() {
   });
 
   function pickMood(v:string){ setMood(v); setStep("type"); }
-  function pickType(v:string){ if(v!=="text") return; setPos(Math.floor(Math.random()*5)+1); setStep("queue"); }
+ async function pickType(v:string){
+  if(v!=="text") return;
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://opntus-backend.onrender.com/api";
+    const res = await fetch(`${apiUrl}/auth/user/start`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ mood: selectedMood || "general" })
+    });
+    const data = await res.json();
+    localStorage.setItem("opntus_session", data.sessionId);
+    localStorage.setItem("opntus_name", data.anonymousName);
+    localStorage.setItem("opntus_mood", selectedMood || "general");
+    setPos(Math.floor(Math.random()*5)+1);
+    setStep("queue");
+  } catch(err) {
+    console.error("Failed to start session", err);
+    setPos(1);
+    setStep("queue");
+  }
+}
 
   return (
     <section id="talk" className="py-24 bg-white dark:bg-[#12111A]">
@@ -272,6 +293,7 @@ function TalkNow() {
                 </div>
               </div>
               <p className="text-sm text-slate-400">Your identity: <span className="font-mono font-semibold text-blue-500">{anonName}</span></p>
+              <a href="/chat" className="mt-6 inline-block bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-semibold text-sm transition-colors">Enter Chat Room</a>
             </motion.div>
           )}
         </AnimatePresence>
