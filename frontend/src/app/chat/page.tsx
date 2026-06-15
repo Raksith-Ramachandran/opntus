@@ -64,15 +64,17 @@ export default function ChatPage() {
       auth: listener ? { token } : { sessionId: storedSession },
       transports: ["websocket", "polling"],
       reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
     });
 
     socket.on("connect", () => {
       setConnected(true);
-      // User joins queue; listener joins room directly
-      if (!listener) {
-        socket.emit("join:queue", { mood: storedMood || "general" });
-      } else if (storedRoom) {
+      // Listener joins room directly, user joins queue
+      if (listener && storedRoom) {
         socket.emit("join:room", { roomId: storedRoom });
+      } else if (!listener) {
+        socket.emit("join:queue", { mood: storedMood || "general" });
       }
     });
 

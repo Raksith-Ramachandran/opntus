@@ -41,15 +41,28 @@ export function initSocket(io: SocketServer) {
 
   io.on("connection", (socket: Socket) => {
     const data = socket.data as SocketData;
-    logger.info(`Socket connected: ${socket.id} (${data.userType})`);
-    if (data.userType === "listener" && data.listenerId) listenerSockets.set(data.listenerId, socket.id);
-    else if (data.userId) userSockets.set(data.userId, socket.id);
+    logger.info(`Socket connected: ${socket.id} (${data.userType}, ${data.userType === "listener" ? "listenerId: " + data.listenerId : "userId: " + data.userId})`);
+    if (data.userType === "listener" && data.listenerId) {
+      listenerSockets.set(data.listenerId, socket.id);
+      logger.info(`Listener socket mapped: ${data.listenerId} -> ${socket.id}`);
+    }
+    else if (data.userId) {
+      userSockets.set(data.userId, socket.id);
+      logger.info(`User socket mapped: ${data.userId} -> ${socket.id}`);
+    }
 
     // Listener rejoining a room after page navigation
-    socket.on("join:room", ({ roomId }: { roomId: string }) => {
+    socket.on("join:room", async ({ roomId }: { roomId: string }) => {
       if (data.userType !== "listener") return;
       socket.join(roomId);
-      logger.info(`Listener rejoined room: ${roomId}`);
+      logger.info(`Listener ${data.listenerId} rejoined room: ${roomId}`);
+      
+      // Update listener status back to busy if they were in a session
+      const room = activeRooms.get(roomId);
+      if (room && room.listenerId === data.listenerId) {
+        await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+        logger.info(`Listener ${data.listenerId} status set to busy`);
+      }
     });
 
     socket.on("join:queue", async ({ mood }: { mood: string }) => {
@@ -76,12 +89,24 @@ export function initSocket(io: SocketServer) {
       const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const session = await Session.create({ userId: queued.userId, listenerId: data.listenerId, mood: queued.mood, status: "active", startedAt: new Date() });
       activeRooms.set(roomId, { userId, listenerId: data.listenerId! });
+      
+      // Join both listener and user to the room
       socket.join(roomId);
       const userSocketId = userSockets.get(userId);
-      if (userSocketId) io.sockets.sockets.get(userSocketId)?.join(roomId);
+      if (userSocketId) {
+        const userSocket = io.sockets.sockets.get(userSocketId);
+        if (userSocket) userSocket.join(roomId);
+      }
+      
+      // Update listener status to busy
       await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+      logger.info(`Session created: ${roomId}, Listener: ${data.listenerId}, User: ${userId}`);
+      
+      // Emit session:started to both parties
       socket.emit("session:started", { roomId, sessionId: session._id, mood: queued.mood });
-      if (userSocketId) io.to(userSocketId).emit("session:started", { roomId, sessionId: session._id, mood: queued.mood });
+      if (userSocketId) {
+        io.to(userSocketId).emit("session:started", { roomId, sessionId: session._id, mood: queued.mood });
+      }
     });
 
     socket.on("chat:message", async ({ roomId, message, sessionId }) => {
@@ -123,18 +148,31 @@ export function initSocket(io: SocketServer) {
     });
 
     socket.on("disconnect", async () => {
+      logger.info(`Socket disconnected: ${socket.id} (${data.userType})`);
+      
       if (data.userId) {
         const idx = queue.findIndex(q => q.userId === data.userId);
-        if (idx !== -1) queue.splice(idx, 1);
+        if (idx !== -1) {
+          queue.splice(idx, 1);
+          logger.info(`User ${data.userId} removed from queue`);
+        }
         userSockets.delete(data.userId);
       }
+      
       if (data.listenerId) {
-        listenerSockets.delete(data.listenerId);
-        // Delay offline status update to allow reconnects (tab switches, brief network drops)
+        const previousSocketId = listenerSockets.get(data.listenerId);
+        // Only delete if this is the current socket
+        if (previousSocketId === socket.id) {
+          listenerSockets.delete(data.listenerId);
+        }
+        
+        // Delay offline status update to allow reconnects (tab switches, page navigation)
         setTimeout(async () => {
           const currentSocketId = listenerSockets.get(data.listenerId!);
+          // Only set offline if no new connection was established
           if (!currentSocketId) {
             await Listener.findByIdAndUpdate(data.listenerId, { status: "offline" });
+            logger.info(`Listener ${data.listenerId} set to offline after timeout`);
           }
         }, 8000);
       }

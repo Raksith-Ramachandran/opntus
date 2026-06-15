@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [authed, setAuthed] = useState(false);
   const socketRef = useRef<any>(null);
   const onlineRef = useRef(false);
+  const redirectingRef = useRef(false);
 
   const addLog = (msg: string) => {
     console.log(msg);
@@ -68,16 +69,20 @@ export default function Dashboard() {
       });
 
       socket.on("session:started", (data: any) => {
+        if (redirectingRef.current) return;
+        redirectingRef.current = true;
         addLog("🎉 Session started: " + data.roomId);
         localStorage.setItem("opntus_room", String(data.roomId));
         localStorage.setItem("opntus_session_id", String(data.sessionId));
-        socket.disconnect();
-        setTimeout(() => { window.location.href = "/chat?role=listener"; }, 150);
+        addLog("Navigating to chat...");
+        window.location.href = "/chat?role=listener";
       });
     });
 
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
+      if (socketRef.current && !redirectingRef.current) {
+        socketRef.current.disconnect();
+      }
     };
   }, []);
 
