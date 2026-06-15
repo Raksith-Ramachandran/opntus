@@ -67,7 +67,7 @@ export function initSocket(io: SocketServer) {
       if (idx === -1) { socket.emit("error", { message: "User no longer in queue" }); return; }
       const queued = queue.splice(idx, 1)[0];
       const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      const session = await Session.create({ userId: data.listenerId, listenerId: data.listenerId, mood: queued.mood, status: "active", startedAt: new Date() });
+      const session = await Session.create({ userId: queued.userId, listenerId: data.listenerId, mood: queued.mood, status: "active", startedAt: new Date() });
       activeRooms.set(roomId, { userId, listenerId: data.listenerId! });
       socket.join(roomId);
       const userSocketId = userSockets.get(userId);

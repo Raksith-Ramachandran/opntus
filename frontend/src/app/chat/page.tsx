@@ -2,7 +2,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
-import { useVoiceChat } from "@/hooks/useVoiceChat";
 
 interface Msg {
   id: string;
@@ -28,42 +27,63 @@ export default function ChatPage() {
   const socketRef = useRef<Socket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const { inCall, muted, startCall, endCall, toggleMute, remoteAudioRef } = useVoiceChat(socketRef.current, roomId);
   const [anonName, setAnonName] = useState("Anonymous");
-  const [mood, setMood] = useState("general");
+  const [isListener, setIsListener] = useState(false);
 
   useEffect(() => {
-    // Get session info from localStorage
+    const params = new URLSearchParams(window.location.search);
+    const role = params.get("role");
+    const listener = role === "listener";
+    setIsListener(listener);
+
+    const token = localStorage.getItem("opntus_token");
     const storedSession = localStorage.getItem("opntus_session");
     const storedName = localStorage.getItem("opntus_name");
     const storedMood = localStorage.getItem("opntus_mood");
+    const storedRoom = localStorage.getItem("opntus_room");
+    const storedSessionId = localStorage.getItem("opntus_session_id");
 
-    if (storedSession) setSessionId(storedSession);
     if (storedName) setAnonName(storedName);
-    if (storedMood) setMood(storedMood);
 
-    // Connect socket
+    // If listener, pre-fill room/session and skip waiting screen
+    if (listener && storedRoom && storedSessionId) {
+      setRoomId(storedRoom);
+      setSessionId(storedSessionId);
+      setWaiting(false);
+      setMsgs([{
+        id: "welcome",
+        text: "You are now connected with the user. You can start the conversation.",
+        sender: "listener",
+        ts: new Date(),
+        status: "read",
+      }]);
+    }
+
+    // Connect socket with correct auth
     const socket = io(WS_URL, {
-      auth: { sessionId: storedSession },
+      auth: listener ? { token } : { sessionId: storedSession },
       transports: ["websocket", "polling"],
       reconnection: true,
     });
 
     socket.on("connect", () => {
       setConnected(true);
-      // Join queue
-      socket.emit("join:queue", { mood: storedMood || "general" });
+      // User joins queue; listener joins room directly
+      if (!listener) {
+        socket.emit("join:queue", { mood: storedMood || "general" });
+      } else if (storedRoom) {
+        socket.emit("join:room", { roomId: storedRoom });
+      }
     });
 
     socket.on("disconnect", () => setConnected(false));
 
-    // Queue position updates
-    socket.on("queue:update", ({ position, estimatedWaitMinutes, availableListeners }) => {
+    socket.on("queue:update", ({ position }: { position: number }) => {
       setQueuePos(position);
     });
 
-    // Session started — listener accepted
-    socket.on("session:started", ({ roomId: rId, sessionId: sId }) => {
+    // User receives this when listener accepts
+    socket.on("session:started", ({ roomId: rId, sessionId: sId }: { roomId: string; sessionId: string }) => {
       setRoomId(rId);
       setSessionId(sId);
       setWaiting(false);
@@ -76,25 +96,24 @@ export default function ChatPage() {
       }]);
     });
 
-    // Receive messages
-    socket.on("chat:message", ({ id, text, senderType, timestamp }) => {
-      if (senderType === "listener") {
+    socket.on("chat:message", ({ id, text, senderType, timestamp }: { id: string; text: string; senderType: string; timestamp: string }) => {
+      const isMyMessage = listener ? senderType === "listener" : senderType === "user";
+      if (!isMyMessage) {
         setMsgs(prev => [...prev, {
           id,
           text,
-          sender: "listener",
+          sender: senderType as "user" | "listener",
           ts: new Date(timestamp),
           status: "read",
         }]);
       }
     });
 
-    // Typing indicator
-    socket.on("chat:typing", ({ senderType, isTyping }) => {
-      if (senderType === "listener") setLTyping(isTyping);
+    socket.on("chat:typing", ({ senderType, isTyping }: { senderType: string; isTyping: boolean }) => {
+      const otherType = listener ? "user" : "listener";
+      if (senderType === otherType) setLTyping(isTyping);
     });
 
-    // Session ended by listener
     socket.on("session:ended", () => {
       window.location.href = "/post-session";
     });
@@ -103,7 +122,6 @@ export default function ChatPage() {
     return () => { socket.disconnect(); };
   }, []);
 
-  // Session timer — only when connected
   useEffect(() => {
     if (waiting) return;
     const t = setInterval(() => setSecs(s => s + 1), 1000);
@@ -129,7 +147,7 @@ export default function ChatPage() {
     const msg: Msg = {
       id,
       text: input.trim(),
-      sender: "user",
+      sender: isListener ? "listener" : "user",
       ts: new Date(),
       status: "sending",
     };
@@ -137,16 +155,12 @@ export default function ChatPage() {
     setInput("");
     if (taRef.current) taRef.current.style.height = "auto";
 
-    socketRef.current.emit("chat:message", {
-      roomId,
-      sessionId,
-      message: input.trim(),
-    });
+    socketRef.current.emit("chat:message", { roomId, sessionId, message: input.trim() });
 
     setTimeout(() => {
       setMsgs(prev => prev.map(m => m.id === id ? { ...m, status: "sent" } : m));
     }, 500);
-  }, [input, roomId, sessionId]);
+  }, [input, roomId, sessionId, isListener]);
 
   const sendTyping = useCallback((isTyping: boolean) => {
     if (!socketRef.current || !roomId) return;
@@ -164,7 +178,7 @@ export default function ChatPage() {
     window.location.href = "/post-session";
   };
 
-  // Show queue waiting screen
+  // Waiting / queue screen (users only)
   if (waiting) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F8F7FF] to-[#E8F4F0] dark:from-[#12111A] dark:to-[#111820]">
@@ -196,11 +210,13 @@ export default function ChatPage() {
       <div className="bg-white dark:bg-[#1A1928] border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center text-white text-sm font-bold">L</div>
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center text-white text-sm font-bold">
+              {isListener ? "U" : "L"}
+            </div>
             <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-[#1A1928] ${connected ? "bg-green-400" : "bg-slate-400"}`} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Listener</p>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{isListener ? "User" : "Listener"}</p>
             <p className="text-xs text-slate-400">{connected ? "Online" : "Reconnecting..."}</p>
           </div>
         </div>
@@ -216,20 +232,31 @@ export default function ChatPage() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
         <p className="text-center text-xs text-slate-400 mb-6">
-          You are <span className="font-mono font-semibold text-blue-500">{anonName}</span>. This session is private.
+          {isListener ? "You are the listener in this session." : <>You are <span className="font-mono font-semibold text-blue-500">{anonName}</span>. This session is private.</>}
         </p>
         {msgs.map(m => (
           <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className={`flex ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
+            className={`flex ${
+              (isListener && m.sender === "listener") || (!isListener && m.sender === "user")
+                ? "justify-end" : "justify-start"
+            }`}>
             <div className={`max-w-[75%] md:max-w-[60%] px-4 py-3 ${
-              m.sender === "user"
+              (isListener && m.sender === "listener") || (!isListener && m.sender === "user")
                 ? "bg-blue-600 text-white rounded-2xl rounded-br-sm"
                 : "bg-white dark:bg-[#1A1928] text-slate-800 dark:text-slate-100 border border-slate-100 dark:border-slate-800 rounded-2xl rounded-bl-sm"
             }`}>
               <p className="text-sm leading-relaxed">{m.text}</p>
-              <div className={`flex items-center gap-1 mt-1 ${m.sender === "user" ? "justify-end" : "justify-start"}`}>
-                <span className={`text-[10px] ${m.sender === "user" ? "text-blue-200" : "text-slate-400"}`}>{fmtT(m.ts)}</span>
-                {m.sender === "user" && <span className="text-[10px] text-blue-200">{m.status === "sending" ? "◌" : "✓✓"}</span>}
+              <div className={`flex items-center gap-1 mt-1 ${
+                (isListener && m.sender === "listener") || (!isListener && m.sender === "user")
+                  ? "justify-end" : "justify-start"
+              }`}>
+                <span className={`text-[10px] ${
+                  (isListener && m.sender === "listener") || (!isListener && m.sender === "user")
+                    ? "text-blue-200" : "text-slate-400"
+                }`}>{fmtT(m.ts)}</span>
+                {((isListener && m.sender === "listener") || (!isListener && m.sender === "user")) && (
+                  <span className="text-[10px] text-blue-200">{m.status === "sending" ? "◌" : "✓✓"}</span>
+                )}
               </div>
             </div>
           </motion.div>
