@@ -16,7 +16,7 @@ r.post("/listener/login",
     if(!listener||!(await listener.comparePassword(password))) return res.status(401).json({error:"Invalid credentials"});
     if(listener.status==="suspended") return res.status(403).json({error:"Account suspended"});
     await Listener.findByIdAndUpdate(listener._id,{lastLoginAt:new Date()});
-    const token=jwt.sign({id:listener._id,role:listener.role},process.env.JWT_SECRET!,{expiresIn:process.env.JWT_EXPIRES_IN||"7d"});
+    const token=jwt.sign({id:listener._id,role:listener.role},process.env.JWT_SECRET!,{expiresIn:"7d"});
     res.json({token,listener:{id:listener._id,name:listener.name,email:listener.email,role:listener.role,status:listener.status}});
   }
 );
