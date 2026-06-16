@@ -45,11 +45,13 @@ export function initSocket(io: SocketServer) {
     const data = socket.data as SocketData;
     logger.info(`Socket connected: ${socket.id} type=${data.userType}`);
 
-    if (data.userType === "listener" && data.listenerId) {
-      listenerSockets.set(data.listenerId, socket.id);
-    } else if (data.userId) {
-      userSockets.set(data.userId, socket.id);
-    }
+   if (data.userType === "listener" && data.listenerId) {
+  listenerSockets.set(data.listenerId, socket.id);
+  logger.info(`Listener socket mapped: ${data.listenerId} -> ${socket.id}`);
+} else if (data.userId) {
+  userSockets.set(data.userId, socket.id);
+  logger.info(`User socket mapped: ${data.userId} -> ${socket.id}`);
+}
 
     // User joins queue
     socket.on("join:queue", async ({ mood }: { mood: string }) => {
@@ -78,75 +80,95 @@ export function initSocket(io: SocketServer) {
 
     // Listener rejoins existing room (after navigation)
     socket.on("join:room", async ({ roomId }: { roomId: string }) => {
-      if (data.userType !== "listener" || !data.listenerId) return;
-      socket.join(roomId);
-      logger.info(`Listener ${data.listenerId} rejoined room ${roomId}`);
-      const room = activeRooms.get(roomId);
-      if (room && room.listenerId === data.listenerId) {
-        await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
-      }
-    });
+  socket.join(roomId);
+  logger.info(`${data.userType} rejoined room ${roomId}`);
+
+  if (data.userType === "listener" && data.listenerId) {
+    // Update listener socket mapping
+    listenerSockets.set(data.listenerId, socket.id);
+    const room = activeRooms.get(roomId);
+    if (room && room.listenerId === data.listenerId) {
+      await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+    }
+  } else if (data.userType === "user" && data.userId) {
+    // Update user socket mapping
+    userSockets.set(data.userId, socket.id);
+  }
+});
 
     // Listener accepts user
     socket.on("listener:accept", async ({ userId }: { userId: string }) => {
-      if (data.userType !== "listener" || !data.listenerId) return;
-      logger.info(`Listener ${data.listenerId} accepting user ${userId}`);
+  if (data.userType !== "listener" || !data.listenerId) return;
+  logger.info(`Listener ${data.listenerId} accepting user ${userId}`);
 
-      const idx = queue.findIndex(q => q.userId === userId);
-      if (idx === -1) {
-        socket.emit("error", { message: "User no longer in queue" });
-        return;
-      }
+  const idx = queue.findIndex(q => q.userId === userId);
+  if (idx === -1) {
+    socket.emit("error", { message: "User no longer in queue" });
+    return;
+  }
 
-      const queued = queue.splice(idx, 1)[0];
-      const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const queued = queue.splice(idx, 1)[0];
+  const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-      // Create session with correct userId
-      const session = await Session.create({
-        userId: queued.userId,
-        listenerId: data.listenerId,
-        mood: queued.mood,
-        status: "active",
-        startedAt: new Date(),
-      });
+  // Create session
+  const session = await Session.create({
+    userId: queued.userId,
+    listenerId: data.listenerId,
+    mood: queued.mood,
+    status: "active",
+    startedAt: new Date(),
+  });
 
-      activeRooms.set(roomId, { userId: queued.userId, listenerId: data.listenerId! });
+  activeRooms.set(roomId, {
+    userId: queued.userId,
+    listenerId: data.listenerId!,
+  });
 
-      // Join listener to room
-      socket.join(roomId);
-      logger.info(`Listener joined room ${roomId}`);
+  // Join listener to room
+  socket.join(roomId);
+  logger.info(`Listener joined room ${roomId}`);
 
-      // Join user to room
-      const userSocketId = userSockets.get(queued.userId);
-      if (userSocketId) {
-        const userSocket = io.sockets.sockets.get(userSocketId);
-        if (userSocket) {
-          userSocket.join(roomId);
-          logger.info(`User joined room ${roomId}`);
-        }
-      }
+  const sessionData = {
+    roomId,
+    sessionId: String(session._id),
+    mood: queued.mood,
+  };
 
-      // Update listener status
-      await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+  // Find user socket — try multiple times
+  const tryNotifyUser = (attempts: number) => {
+    const userSocketId = userSockets.get(queued.userId);
+    logger.info(`Looking for user socket. userId=${queued.userId} socketId=${userSocketId} attempt=${attempts}`);
 
-      const sessionData = {
-        roomId,
-        sessionId: String(session._id),
-        mood: queued.mood,
-      };
-
-      // Notify listener
-      socket.emit("session:started", sessionData);
-      logger.info(`Emitted session:started to listener`);
-
-      // Notify user
-      if (userSocketId) {
+    if (userSocketId) {
+      const userSocket = io.sockets.sockets.get(userSocketId);
+      if (userSocket) {
+        userSocket.join(roomId);
+        userSocket.emit("session:started", sessionData);
+        logger.info(`✅ Emitted session:started to user via socket ${userSocketId}`);
+      } else {
+        // Emit directly to socketId
         io.to(userSocketId).emit("session:started", sessionData);
-        logger.info(`Emitted session:started to user`);
+        logger.info(`✅ Emitted session:started to user via room ${userSocketId}`);
       }
+    } else if (attempts > 0) {
+      // Retry after 500ms
+      logger.info(`User socket not found, retrying in 500ms...`);
+      setTimeout(() => tryNotifyUser(attempts - 1), 500);
+    } else {
+      logger.warn(`❌ Could not find user socket after all attempts`);
+    }
+  };
 
-      logger.info(`Session ${session._id} started: user=${queued.userId} listener=${data.listenerId}`);
-    });
+  // Update listener status
+  await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+
+  // Notify listener immediately
+  socket.emit("session:started", sessionData);
+  logger.info(`Emitted session:started to listener`);
+
+  // Notify user with retries
+  tryNotifyUser(5);
+});
 
     // Chat message
     socket.on("chat:message", async ({ roomId, message, sessionId }) => {

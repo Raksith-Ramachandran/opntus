@@ -81,10 +81,30 @@ export default function ChatPage() {
           socket.emit("join:room", { roomId: storedRoom });
           console.log("Listener rejoined room:", storedRoom);
         } else if (!isListener.current) {
-          // User joins queue
-          const mood = localStorage.getItem("opntus_mood") || "general";
-          socket.emit("join:queue", { mood });
-          console.log("User joined queue, mood:", mood);
+          // Check if user already has an active session
+          const existingRoom = localStorage.getItem("opntus_room");
+          const existingSessionId = localStorage.getItem("opntus_session_id");
+
+          if (existingRoom && existingSessionId) {
+            // Rejoin existing room
+            socket.emit("join:room", { roomId: existingRoom });
+            roomRef.current = existingRoom;
+            sessionIdRef.current = existingSessionId;
+            setWaiting(false);
+            setMsgs([{
+              id: "reconnected",
+              text: "Reconnected to your session.",
+              sender: "listener",
+              ts: new Date(),
+              status: "read",
+            }]);
+            console.log("User rejoined existing room:", existingRoom);
+          } else {
+            // Join queue fresh
+            const mood = localStorage.getItem("opntus_mood") || "general";
+            socket.emit("join:queue", { mood });
+            console.log("User joined queue, mood:", mood);
+          }
         }
       });
 
