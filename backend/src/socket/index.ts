@@ -27,9 +27,11 @@ export function initSocket(io: SocketServer) {
         if (!listener || listener.status === "suspended") return next(new Error("Unauthorized"));
         (socket.data as SocketData).listenerId = decoded.id;
         (socket.data as SocketData).userType = "listener";
+        logger.info(`Listener connected: ${decoded.id}`);
       } else if (sessionId) {
         (socket.data as SocketData).userId = sessionId;
         (socket.data as SocketData).userType = "user";
+        logger.info(`User connected: ${sessionId}`);
       } else {
         return next(new Error("Authentication required"));
       }
@@ -41,143 +43,193 @@ export function initSocket(io: SocketServer) {
 
   io.on("connection", (socket: Socket) => {
     const data = socket.data as SocketData;
-    logger.info(`Socket connected: ${socket.id} (${data.userType}, ${data.userType === "listener" ? "listenerId: " + data.listenerId : "userId: " + data.userId})`);
+    logger.info(`Socket connected: ${socket.id} type=${data.userType}`);
+
     if (data.userType === "listener" && data.listenerId) {
       listenerSockets.set(data.listenerId, socket.id);
-      logger.info(`Listener socket mapped: ${data.listenerId} -> ${socket.id}`);
-    }
-    else if (data.userId) {
+    } else if (data.userId) {
       userSockets.set(data.userId, socket.id);
-      logger.info(`User socket mapped: ${data.userId} -> ${socket.id}`);
     }
 
-    // Listener rejoining a room after page navigation
-    socket.on("join:room", async ({ roomId }: { roomId: string }) => {
-      if (data.userType !== "listener") return;
-      socket.join(roomId);
-      logger.info(`Listener ${data.listenerId} rejoined room: ${roomId}`);
-      
-      // Update listener status back to busy if they were in a session
-      const room = activeRooms.get(roomId);
-      if (room && room.listenerId === data.listenerId) {
-        await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
-        logger.info(`Listener ${data.listenerId} status set to busy`);
-      }
-    });
-
+    // User joins queue
     socket.on("join:queue", async ({ mood }: { mood: string }) => {
       if (data.userType !== "user" || !data.userId) return;
-      if (!queue.find(q => q.userId === data.userId))
+      if (!queue.find(q => q.userId === data.userId)) {
         queue.push({ userId: data.userId!, mood, socketId: socket.id, joinedAt: new Date() });
+        logger.info(`User ${data.userId} joined queue. Mood: ${mood}. Queue length: ${queue.length}`);
+      }
       const position = queue.findIndex(q => q.userId === data.userId) + 1;
       const availableListeners = await Listener.countDocuments({ status: "online" });
-      socket.emit("queue:update", { position, estimatedWaitMinutes: Math.max(1, position * 2), availableListeners });
+      socket.emit("queue:update", {
+        position,
+        estimatedWaitMinutes: Math.max(1, position * 2),
+        availableListeners,
+      });
+      // Notify all listeners
       io.emit("queue:new_user", { userId: data.userId, mood, queueLength: queue.length });
     });
 
+    // User leaves queue
     socket.on("leave:queue", () => {
       if (!data.userId) return;
       const idx = queue.findIndex(q => q.userId === data.userId);
       if (idx !== -1) queue.splice(idx, 1);
     });
 
-    socket.on("listener:accept", async ({ userId }: { userId: string }) => {
+    // Listener rejoins existing room (after navigation)
+    socket.on("join:room", async ({ roomId }: { roomId: string }) => {
       if (data.userType !== "listener" || !data.listenerId) return;
-      const idx = queue.findIndex(q => q.userId === userId);
-      if (idx === -1) { socket.emit("error", { message: "User no longer in queue" }); return; }
-      const queued = queue.splice(idx, 1)[0];
-      const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      const session = await Session.create({ userId: queued.userId, listenerId: data.listenerId, mood: queued.mood, status: "active", startedAt: new Date() });
-      activeRooms.set(roomId, { userId, listenerId: data.listenerId! });
-      
-      // Join both listener and user to the room
       socket.join(roomId);
-      const userSocketId = userSockets.get(userId);
-      if (userSocketId) {
-        const userSocket = io.sockets.sockets.get(userSocketId);
-        if (userSocket) userSocket.join(roomId);
-      }
-      
-      // Update listener status to busy
-      await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
-      logger.info(`Session created: ${roomId}, Listener: ${data.listenerId}, User: ${userId}`);
-      
-      // Emit session:started to both parties
-      socket.emit("session:started", { roomId, sessionId: session._id, mood: queued.mood });
-      if (userSocketId) {
-        io.to(userSocketId).emit("session:started", { roomId, sessionId: session._id, mood: queued.mood });
+      logger.info(`Listener ${data.listenerId} rejoined room ${roomId}`);
+      const room = activeRooms.get(roomId);
+      if (room && room.listenerId === data.listenerId) {
+        await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
       }
     });
 
+    // Listener accepts user
+    socket.on("listener:accept", async ({ userId }: { userId: string }) => {
+      if (data.userType !== "listener" || !data.listenerId) return;
+      logger.info(`Listener ${data.listenerId} accepting user ${userId}`);
+
+      const idx = queue.findIndex(q => q.userId === userId);
+      if (idx === -1) {
+        socket.emit("error", { message: "User no longer in queue" });
+        return;
+      }
+
+      const queued = queue.splice(idx, 1)[0];
+      const roomId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+      // Create session with correct userId
+      const session = await Session.create({
+        userId: queued.userId,
+        listenerId: data.listenerId,
+        mood: queued.mood,
+        status: "active",
+        startedAt: new Date(),
+      });
+
+      activeRooms.set(roomId, { userId: queued.userId, listenerId: data.listenerId! });
+
+      // Join listener to room
+      socket.join(roomId);
+      logger.info(`Listener joined room ${roomId}`);
+
+      // Join user to room
+      const userSocketId = userSockets.get(queued.userId);
+      if (userSocketId) {
+        const userSocket = io.sockets.sockets.get(userSocketId);
+        if (userSocket) {
+          userSocket.join(roomId);
+          logger.info(`User joined room ${roomId}`);
+        }
+      }
+
+      // Update listener status
+      await Listener.findByIdAndUpdate(data.listenerId, { status: "busy" });
+
+      const sessionData = {
+        roomId,
+        sessionId: String(session._id),
+        mood: queued.mood,
+      };
+
+      // Notify listener
+      socket.emit("session:started", sessionData);
+      logger.info(`Emitted session:started to listener`);
+
+      // Notify user
+      if (userSocketId) {
+        io.to(userSocketId).emit("session:started", sessionData);
+        logger.info(`Emitted session:started to user`);
+      }
+
+      logger.info(`Session ${session._id} started: user=${queued.userId} listener=${data.listenerId}`);
+    });
+
+    // Chat message
     socket.on("chat:message", async ({ roomId, message, sessionId }) => {
       if (!message || typeof message !== "string" || message.length > 5000) return;
       const sanitized = message.trim().replace(/[<>]/g, "");
-      const saved = await Message.create({ sessionId, senderType: data.userType, message: sanitized, timestamp: new Date() });
-      io.to(roomId).emit("chat:message", { id: saved._id, text: sanitized, senderType: data.userType, timestamp: saved.timestamp });
+      const saved = await Message.create({
+        sessionId,
+        senderType: data.userType,
+        message: sanitized,
+        timestamp: new Date(),
+      });
+      io.to(roomId).emit("chat:message", {
+        id: String(saved._id),
+        text: sanitized,
+        senderType: data.userType,
+        timestamp: saved.timestamp,
+      });
     });
 
+    // Typing indicator
     socket.on("chat:typing", ({ roomId, isTyping }) => {
       socket.to(roomId).emit("chat:typing", { senderType: data.userType, isTyping });
     });
 
-    // Voice chat signaling
+    // Voice signaling
     socket.on("voice:offer", ({ roomId, offer }) => {
       socket.to(roomId).emit("voice:offer", { offer });
     });
-
     socket.on("voice:answer", ({ roomId, answer }) => {
       socket.to(roomId).emit("voice:answer", { answer });
     });
-
     socket.on("voice:ice-candidate", ({ roomId, candidate }) => {
       socket.to(roomId).emit("voice:ice-candidate", { candidate });
     });
 
+    // End session
     socket.on("session:end", async ({ roomId, sessionId }) => {
       const room = activeRooms.get(roomId);
       if (!room) return;
       const endedAt = new Date();
-      const session = await Session.findByIdAndUpdate(sessionId, { status: "completed", endedAt }, { new: true });
+      const session = await Session.findByIdAndUpdate(
+        sessionId, { status: "completed", endedAt }, { new: true }
+      );
       if (session?.startedAt) {
         const dur = Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000);
         await Session.findByIdAndUpdate(sessionId, { durationSeconds: dur });
-        await Listener.findByIdAndUpdate(room.listenerId, { status: "online", $inc: { totalSessions: 1 } });
+        await Listener.findByIdAndUpdate(room.listenerId, {
+          status: "online",
+          $inc: { totalSessions: 1 },
+        });
       }
       io.to(roomId).emit("session:ended", { sessionId });
       activeRooms.delete(roomId);
     });
 
+    // Disconnect
     socket.on("disconnect", async () => {
-      logger.info(`Socket disconnected: ${socket.id} (${data.userType})`);
-      
+      logger.info(`Socket disconnected: ${socket.id} type=${data.userType}`);
+
       if (data.userId) {
         const idx = queue.findIndex(q => q.userId === data.userId);
-        if (idx !== -1) {
-          queue.splice(idx, 1);
-          logger.info(`User ${data.userId} removed from queue`);
-        }
+        if (idx !== -1) queue.splice(idx, 1);
         userSockets.delete(data.userId);
       }
-      
+
       if (data.listenerId) {
         const previousSocketId = listenerSockets.get(data.listenerId);
-        // Only delete if this is the current socket
         if (previousSocketId === socket.id) {
           listenerSockets.delete(data.listenerId);
         }
-        
-        // Delay offline status update to allow reconnects (tab switches, page navigation)
+        // Grace period — wait 8 seconds before marking offline
         setTimeout(async () => {
           const currentSocketId = listenerSockets.get(data.listenerId!);
-          // Only set offline if no new connection was established
           if (!currentSocketId) {
             await Listener.findByIdAndUpdate(data.listenerId, { status: "offline" });
-            logger.info(`Listener ${data.listenerId} set to offline after timeout`);
+            logger.info(`Listener ${data.listenerId} marked offline after grace period`);
           }
         }, 8000);
       }
     });
   });
 
-  setInterval(() => io.emit("queue:status", { length: queue.length, moods: queue.map(q => q.mood) }), 10000);
+  setInterval(() => {
+    io.emit("queue:status", { length: queue.length, moods: queue.map(q => q.mood) });
+  }, 10000);
 }
