@@ -82,6 +82,25 @@
 
 ---
 
+### 4. **User Reconnection Issues** ✅ FIXED
+**Problem**: When user's socket disconnected and reconnected (network hiccup, tab switch), they would rejoin the queue instead of returning to their active chat session.
+
+**Root Cause**:
+- Frontend only checked for existing room for listeners
+- Users always emitted join:queue on reconnect
+- Lost active session context on reconnection
+
+**Solution Applied**:
+- Added localStorage check for existing session (opntus_room and opntus_session_id)
+- If active session exists, user emits join:room instead of join:queue
+- Backend already supported user rejoining via join:room handler
+- User sees "Reconnected to your session" message
+
+**Files Modified**:
+- `frontend/src/app/chat/page.tsx` - Added reconnection logic in connect handler
+
+---
+
 ## Technical Improvements
 
 ### Backend Socket Handler Enhancements
@@ -243,9 +262,10 @@ socket.on("connect", () => {
   - Fixed navigation with redirectingRef
   - Improved socket cleanup logic
 
-- `frontend/src/app/chat/page.tsx` (2 changes)
+- `frontend/src/app/chat/page.tsx` (3 changes)
   - Better reconnection configuration
   - Fixed room joining order for listeners
+  - Added user reconnection logic for active sessions
 
 ---
 
