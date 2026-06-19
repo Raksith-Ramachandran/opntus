@@ -11,11 +11,19 @@ export default function PostSession() {
   const [isListener, setIsListener] = useState(false);
 
   useEffect(() => {
-    // Check if this person was a listener
-    const token = localStorage.getItem("opntus_token");
-    setIsListener(!!token);
+    // Check role from URL param first (most reliable)
+    const urlParams = new URLSearchParams(window.location.search);
+    const roleParam = urlParams.get("role");
 
-    // Clean up session storage
+    // Fallback: check if listener token exists
+    const token = localStorage.getItem("opntus_token");
+
+    const listenerStatus = roleParam === "listener" || (!roleParam && !!token);
+    setIsListener(listenerStatus);
+
+    console.log("Post-session role check:", { roleParam, hasToken: !!token, isListener: listenerStatus });
+
+    // Clean up session-specific storage (but NOT the listener token)
     localStorage.removeItem("opntus_room");
     localStorage.removeItem("opntus_session_id");
     localStorage.removeItem("opntus_session");
