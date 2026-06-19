@@ -16,10 +16,23 @@ export const metadata: Metadata = {
   description:
     "A safe, anonymous space where you can share thoughts, feelings, and struggles without fear of judgment. Talk to trained human listeners — no account required.",
   keywords: ["anonymous support", "emotional support", "mental health", "listener", "talk to someone"],
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/android-chrome-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/android-chrome-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
   openGraph: {
     title: "OPNTUS – Open To Us",
     description: "Safe anonymous emotional support. Real humans. Real listening.",
     type: "website",
+    images: ["/logo-full.png"],
   },
 };
 

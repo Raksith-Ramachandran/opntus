@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
 
 const moods = [
   { label: "Stressed",          emoji: "😤", value: "stressed"      },
@@ -57,7 +58,11 @@ function NavBar() {
   return (
     <nav className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${scrolled?"bg-white/90 dark:bg-[#12111A]/90 backdrop-blur-md shadow-sm":""}`}>
       <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-        <a href="#" className="text-2xl font-serif font-bold text-blue-600 dark:text-blue-400">OPNTUS</a>
+          <a href="#" className="flex items-center gap-2">
+    <Image src="/logo-icon.png" alt="OPNTUS logo" width={36} height={36} className="w-9 h-9" priority />
+    <span className="text-2xl font-serif font-bold text-blue-600 dark:text-blue-400">OPNTUS</span>
+  </a>
+
         <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600 dark:text-slate-300">
           <a href="#how" className="hover:text-blue-600 transition-colors">How It Works</a>
           <a href="#why" className="hover:text-blue-600 transition-colors">Why OPNTUS</a>
@@ -98,6 +103,15 @@ function Hero() {
           transition={{duration:6,repeat:Infinity,ease:"easeInOut"}}/>
       </div>
       <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
+        <motion.div
+    initial={{ opacity: 0, scale: 0.9 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ duration: 0.6 }}
+    className="flex justify-center mb-6"
+  >
+    <Image src="/logo-icon.png" alt="OPNTUS" width={88} height={88} className="w-20 h-20 md:w-24 md:h-24" priority />
+  </motion.div>
+
         <motion.p initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{delay:0.2}}
           className="text-blue-500 dark:text-blue-400 text-sm font-semibold uppercase tracking-[0.15em] mb-6">
           Anonymous Emotional Support
@@ -418,9 +432,13 @@ function Footer() {
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex flex-col md:flex-row justify-between items-start gap-8 mb-10">
           <div>
-            <div className="text-2xl font-serif font-bold text-white mb-2">OPNTUS</div>
-            <p className="text-slate-500 text-sm max-w-xs">Open To Us. A safe, anonymous space for everyone who needs to be heard.</p>
-          </div>
+    <div className="flex items-center gap-2 mb-3">
+      <Image src="/logo-icon.png" alt="OPNTUS logo" width={32} height={32} className="w-8 h-8" />
+      <span className="text-2xl font-serif font-bold text-white">OPNTUS</span>
+    </div>
+    <p className="text-slate-500 text-sm max-w-xs">Open To Us. A safe, anonymous space for everyone who needs to be heard.</p>
+  </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-sm">
             <div>
               <p className="text-slate-400 font-semibold mb-3">Platform</p>

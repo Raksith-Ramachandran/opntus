@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-
+import Image from "next/image";
 export default function ListenerLogin() {
   const [email,setEmail]   = useState("");
   const [pass,setPass]     = useState("");
@@ -28,7 +28,11 @@ export default function ListenerLogin() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F8F7FF] via-[#EEF0FF] to-[#E8F4F0] dark:from-[#12111A] dark:via-[#16132A] dark:to-[#111820] p-6">
       <motion.div initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/" className="text-2xl font-serif font-bold text-blue-600 dark:text-blue-400">OPNTUS</Link>
+          <Link href="/" className="inline-flex items-center gap-2">
+    <Image src="/logo-icon.png" alt="OPNTUS" width={32} height={32} className="w-8 h-8" />
+    <span className="text-2xl font-serif font-bold text-blue-600 dark:text-blue-400">OPNTUS</span>
+  </Link>
+
           <h1 className="text-2xl font-serif font-bold text-slate-800 dark:text-slate-100 mt-6 mb-2">Listener Login</h1>
           <p className="text-slate-500 dark:text-slate-400 text-sm">Sign in to your listener account</p>
         </div>
