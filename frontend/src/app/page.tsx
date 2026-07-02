@@ -223,7 +223,7 @@ function TalkNow() {
 
   function pickMood(v:string){ setMood(v); setStep("type"); }
  async function pickType(v:string){
-  if(v!=="text") return;
+  if(v!=="text" && v!=="voice" && v!=="video") return;
   try {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://opntus-backend.onrender.com/api";
     const res = await fetch(`${apiUrl}/auth/user/start`, {
@@ -235,10 +235,12 @@ function TalkNow() {
     localStorage.setItem("opntus_session", data.sessionId);
     localStorage.setItem("opntus_name", data.anonymousName);
     localStorage.setItem("opntus_mood", selectedMood || "general");
+    localStorage.setItem("opntus_call_type", v);
     setPos(Math.floor(Math.random()*5)+1);
     setStep("queue");
   } catch(err) {
     console.error("Failed to start session", err);
+    localStorage.setItem("opntus_call_type", v);
     setPos(1);
     setStep("queue");
   }
@@ -271,12 +273,11 @@ function TalkNow() {
             <motion.div key="type" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}} transition={{duration:0.35}}>
               <p className="text-center text-slate-600 dark:text-slate-300 font-medium mb-6">How would you like to connect?</p>
               <div className="grid grid-cols-3 gap-4">
-                {[{icon:"💬",label:"Text Chat",v:"text",ok:true},{icon:"🎙",label:"Voice",v:"voice",ok:false},{icon:"📹",label:"Video",v:"video",ok:false}].map(o=>(
-                  <button key={o.v} onClick={()=>pickType(o.v)} disabled={!o.ok}
-                    className={`relative flex flex-col items-center gap-3 p-6 rounded-2xl border transition-all ${o.ok?"border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 active:scale-95":"border-slate-100 dark:border-slate-800 opacity-40 cursor-not-allowed"}`}>
+                {[{icon:"💬",label:"Text Chat",v:"text",ok:true},{icon:"🎙",label:"Voice",v:"voice",ok:true},{icon:"📹",label:"Video",v:"video",ok:true}].map(o=>(
+                  <button key={o.v} onClick={()=>pickType(o.v)}
+                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30 active:scale-95 transition-all">
                     <span className="text-3xl">{o.icon}</span>
                     <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{o.label}</span>
-                    {!o.ok && <span className="absolute top-2 right-2 text-[10px] font-semibold text-purple-500 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-400 px-2 py-0.5 rounded-full">Soon</span>}
                   </button>
                 ))}
               </div>
